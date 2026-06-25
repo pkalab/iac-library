@@ -75,7 +75,7 @@ variable "storage_type" {
 variable "create_parameter_group" {
   description = "Create a custom parameter group"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "parameter_group_family" {

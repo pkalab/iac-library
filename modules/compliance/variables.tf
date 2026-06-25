@@ -3,13 +3,13 @@ variable "environment" {
   type        = string
 }
 
-variable "region" {
-  description = "AWS region"
-  type        = string
-}
-
 variable "force_destroy" {
   description = "Force destroy S3 buckets"
   type        = bool
   default     = false
+}
+
+variable "cis_standards_control_arn" {
+  description = "ARN of the CIS AWS Foundations Benchmark standards control to enable"
+  type        = string
 }

@@ -23,10 +23,3 @@ variable "namespace" {
   type        = string
   default     = "consul"
 }
-
-variable "gossip_secret" {
-  description = "Gossip encryption secret (auto-generated if empty)"
-  type        = string
-  default     = ""
-  sensitive   = true
-}

@@ -6,6 +6,8 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -17,11 +19,21 @@ resource "aws_vpc" "this" {
   }
 }
 
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name        = "${var.environment}-default-sg"
+    Environment = var.environment
+  }
+}
+
+# checkov skip=CKV_AWS_130: Public subnets intentionally assign public IPs
 resource "aws_subnet" "public" {
-  count             = var.az_count
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 4, count.index)
-  availability_zone = local.azs[count.index]
+  count                   = var.az_count
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index)
+  availability_zone       = local.azs[count.index]
   map_public_ip_on_launch = true
 
   tags = {
@@ -123,7 +135,7 @@ resource "aws_route_table_association" "database" {
 }
 
 resource "aws_flow_log" "this" {
-  count = var.enable_flow_logs ? 1 : 0
+  count           = var.enable_flow_logs ? 1 : 0
   iam_role_arn    = aws_iam_role.flow_log[0].arn
   log_destination = aws_cloudwatch_log_group.flow_log[0].arn
   traffic_type    = "ALL"
@@ -135,6 +147,44 @@ resource "aws_cloudwatch_log_group" "flow_log" {
   count             = var.enable_flow_logs ? 1 : 0
   name              = "/aws/vpc/${var.environment}-flow-logs"
   retention_in_days = var.flow_log_retention
+  kms_key_id        = aws_kms_key.flow_log[0].arn
+}
+
+resource "aws_kms_key" "flow_log" {
+  count                   = var.enable_flow_logs ? 1 : 0
+  description             = "VPC flow log encryption key for ${var.environment}"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_key_policy" "flow_log" {
+  count  = var.enable_flow_logs ? 1 : 0
+  key_id = aws_kms_key.flow_log[0].key_id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAccess"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogsUse"
+        Effect    = "Allow"
+        Principal = { Service = "logs.amazonaws.com" }
+        Action    = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey", "kms:CreateGrant"]
+        Resource  = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "flow_log" {
+  count         = var.enable_flow_logs ? 1 : 0
+  name          = "alias/${var.environment}-flow-log"
+  target_key_id = aws_kms_key.flow_log[0].key_id
 }
 
 resource "aws_iam_role" "flow_log" {
@@ -143,9 +193,9 @@ resource "aws_iam_role" "flow_log" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
+      Effect    = "Allow"
       Principal = { Service = "vpc-flow-logs.amazonaws.com" }
-      Action = "sts:AssumeRole"
+      Action    = "sts:AssumeRole"
     }]
   })
 }
@@ -165,7 +215,7 @@ resource "aws_iam_role_policy" "flow_log" {
         "logs:DescribeLogGroups",
         "logs:DescribeLogStreams",
       ]
-      Resource = "*"
+      Resource = "${aws_cloudwatch_log_group.flow_log[0].arn}:*"
     }]
   })
 }

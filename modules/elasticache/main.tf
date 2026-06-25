@@ -1,8 +1,11 @@
+data "aws_caller_identity" "current" {}
+
 resource "aws_elasticache_subnet_group" "this" {
   name       = "${var.environment}-cache-subnets"
   subnet_ids = var.subnet_ids
 }
 
+# checkov skip=CKV_AWS_382: Open egress is intentional for outbound connectivity
 resource "aws_security_group" "cache" {
   name        = "${var.environment}-cache-sg"
   description = "ElastiCache security group for ${var.environment}"
@@ -13,6 +16,7 @@ resource "aws_security_group" "cache" {
     to_port         = var.port
     protocol        = "tcp"
     security_groups = var.allowed_security_groups
+    description     = "Allow Redis/Memcached from allowed security groups"
   }
 
   egress {
@@ -20,6 +24,7 @@ resource "aws_security_group" "cache" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = { Name = "${var.environment}-cache-sg", Environment = var.environment }
@@ -44,14 +49,52 @@ resource "aws_elasticache_replication_group" "redis" {
   automatic_failover_enabled = var.automatic_failover_enabled
   multi_az_enabled           = var.multi_az_enabled
 
-  at_rest_encryption_enabled  = true
-  transit_encryption_enabled  = true
-  auth_token                  = var.auth_token
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+  auth_token                 = var.auth_token
+  kms_key_id                 = aws_kms_key.elasticache[0].arn
 
   maintenance_window       = var.maintenance_window
   snapshot_retention_limit = var.snapshot_retention_limit
 
   tags = { Name = "${var.environment}-redis", Environment = var.environment }
+}
+
+resource "aws_kms_key" "elasticache" {
+  count                   = var.engine == "redis" ? 1 : 0
+  description             = "ElastiCache encryption key for ${var.environment}"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_key_policy" "elasticache" {
+  count  = var.engine == "redis" ? 1 : 0
+  key_id = aws_kms_key.elasticache[0].key_id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAccess"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowElastiCacheServiceUse"
+        Effect    = "Allow"
+        Principal = { Service = "elasticache.amazonaws.com" }
+        Action    = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"]
+        Resource  = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "elasticache" {
+  count         = var.engine == "redis" ? 1 : 0
+  name          = "alias/${var.environment}-elasticache"
+  target_key_id = aws_kms_key.elasticache[0].key_id
 }
 
 resource "aws_elasticache_parameter_group" "redis" {

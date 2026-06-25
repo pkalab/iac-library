@@ -17,11 +17,15 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [networking, eks, rds, elasticache, vault, consul, compliance]
     steps:
       - uses: actions/checkout@v4
       - uses: terraform-linters/setup-tflint@v4
-      - run: tflint --init && tflint -c .tflint.hcl
-        working-directory: modules/networking
+      - run: tflint --init
+      - run: tflint -c ../../.tflint.hcl
+        working-directory: modules/${{ matrix.module }}
 
   validate:
     runs-on: ubuntu-latest

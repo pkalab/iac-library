@@ -32,12 +32,6 @@ variable "public_access_cidrs" {
   default     = []
 }
 
-variable "oidc_thumbprint" {
-  description = "Thumbprint for OIDC provider"
-  type        = string
-  default     = ""
-}
-
 variable "node_instance_types" {
   description = "EC2 instance types for node group"
   type        = list(string)

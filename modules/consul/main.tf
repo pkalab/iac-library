@@ -3,15 +3,38 @@ data "aws_eks_cluster" "this" {
   name = var.eks_cluster_name
 }
 
+module "nlb_logs" {
+  source      = "../s3-access-logs"
+  name_prefix = "${var.environment}-consul-nlb-logs"
+}
+
 resource "aws_kms_key" "consul" {
   description             = "Consul gossip encryption key for ${var.environment}"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 }
 
-resource "aws_kms_ciphertext" "consul_gossip" {
-  key_id    = aws_kms_key.consul.key_id
-  plaintext = var.gossip_secret != "" ? var.gossip_secret : "0123456789abcdef0123456789abcdef"
+resource "aws_kms_key_policy" "consul" {
+  key_id = aws_kms_key.consul.key_id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAccess"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowConsulDecrypt"
+        Effect    = "Allow"
+        Principal = { AWS = aws_iam_role.consul.arn }
+        Action    = ["kms:Decrypt", "kms:GenerateRandom"]
+        Resource  = "*"
+      }
+    ]
+  })
 }
 
 resource "aws_iam_policy" "consul" {
@@ -54,10 +77,19 @@ resource "aws_iam_role_policy_attachment" "consul" {
 }
 
 resource "aws_lb" "consul" {
-  name               = "${var.environment}-consul-nlb"
-  internal           = true
-  load_balancer_type = "network"
-  subnets            = var.subnet_ids
+  name                             = "${var.environment}-consul-nlb"
+  internal                         = true
+  load_balancer_type               = "network"
+  subnets                          = var.subnet_ids
+  enable_deletion_protection       = true
+  enable_cross_zone_load_balancing = true
+
+  access_logs {
+    bucket  = module.nlb_logs.bucket_id
+    prefix  = "consul-nlb"
+    enabled = true
+  }
+
   tags = { Name = "${var.environment}-consul-nlb", Environment = var.environment }
 }
 

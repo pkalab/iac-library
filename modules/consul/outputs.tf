@@ -8,11 +8,6 @@ output "kms_key_arn" {
   value       = aws_kms_key.consul.arn
 }
 
-output "gossip_encrypted_secret" {
-  description = "Encrypted gossip secret (base64)"
-  value       = aws_kms_ciphertext.consul_gossip.ciphertext_blob
-}
-
 output "irsa_role_arn" {
   description = "IRSA role ARN for Consul"
   value       = aws_iam_role.consul.arn

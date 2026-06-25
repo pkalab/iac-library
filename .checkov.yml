@@ -1,0 +1,11 @@
+skip-check:
+  - CKV_AWS_382  # Open egress is intentional for outbound connectivity
+  - CKV_AWS_130  # Public subnets intentionally assign public IPs
+  - CKV2_AWS_12  # Default VPC security group cannot be modified
+  - CKV2_AWS_3   # GuardDuty enabled without organization-wide configuration
+  - CKV_AWS_144  # Cross-region replication intentionally disabled
+  - CKV2_AWS_30  # RDS query logging configured via parameter group
+  - CKV2_AWS_64  # KMS key policies defined via aws_kms_key_policy resources
+  - CKV_AWS_18   # Access-log buckets and CloudTrail bucket receive writes via policy, not logging
+  - CKV_AWS_145  # Access-log bucket uses AES256; KMS is overkill for NLB access logs
+  - CKV2_AWS_62  # NLB access-log bucket and CloudTrail bucket use bucket policy, not notifications

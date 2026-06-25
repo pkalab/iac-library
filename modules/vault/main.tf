@@ -3,6 +3,11 @@ data "aws_eks_cluster" "this" {
   name = var.eks_cluster_name
 }
 
+module "nlb_logs" {
+  source      = "../s3-access-logs"
+  name_prefix = "${var.environment}-vault-nlb-logs"
+}
+
 resource "aws_dynamodb_table" "vault" {
   name         = "${var.environment}-vault-storage"
   billing_mode = "PAY_PER_REQUEST"
@@ -18,7 +23,8 @@ resource "aws_dynamodb_table" "vault" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled     = true
+    kms_key_arn = aws_kms_key.vault_unseal.arn
   }
 
   tags = { Name = "${var.environment}-vault-storage", Environment = var.environment }
@@ -28,7 +34,30 @@ resource "aws_kms_key" "vault_unseal" {
   description             = "Vault auto-unseal key for ${var.environment}"
   deletion_window_in_days = 7
   enable_key_rotation     = true
-  tags = { Name = "${var.environment}-vault-unseal", Environment = var.environment }
+  tags                    = { Name = "${var.environment}-vault-unseal", Environment = var.environment }
+}
+
+resource "aws_kms_key_policy" "vault_unseal" {
+  key_id = aws_kms_key.vault_unseal.key_id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAccess"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowVaultUnseal"
+        Effect    = "Allow"
+        Principal = { AWS = aws_iam_role.vault.arn }
+        Action    = ["kms:Encrypt", "kms:Decrypt", "kms:DescribeKey"]
+        Resource  = "*"
+      }
+    ]
+  })
 }
 
 resource "aws_kms_alias" "vault_unseal" {
@@ -90,10 +119,19 @@ resource "aws_iam_role_policy_attachment" "vault" {
 }
 
 resource "aws_lb" "vault" {
-  name               = "${var.environment}-vault-nlb"
-  internal           = true
-  load_balancer_type = "network"
-  subnets            = var.subnet_ids
+  name                             = "${var.environment}-vault-nlb"
+  internal                         = true
+  load_balancer_type               = "network"
+  subnets                          = var.subnet_ids
+  enable_deletion_protection       = true
+  enable_cross_zone_load_balancing = true
+
+  access_logs {
+    bucket  = module.nlb_logs.bucket_id
+    prefix  = "vault-nlb"
+    enabled = true
+  }
+
   tags = { Name = "${var.environment}-vault-nlb", Environment = var.environment }
 }
 

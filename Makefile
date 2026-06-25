@@ -11,7 +11,7 @@ fmt: ## Format all Terraform files
 lint: ## Run tflint and checkov
 	@for dir in modules/*/; do \
 		echo "==> Linting $$dir"; \
-		(cd "$$dir" && tflint --init && tflint && checkov -d . --framework terraform 2>/dev/null || true); \
+		(cd "$$dir" && tflint --init --config ../../.tflint.hcl && tflint --config ../../.tflint.hcl && checkov -d . --framework terraform 2>/dev/null || true); \
 	done
 
 docs: ## Generate terraform-docs for all modules

@@ -6,9 +6,9 @@ resource "aws_iam_role" "cluster" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
+      Effect    = "Allow"
       Principal = { Service = "eks.amazonaws.com" }
-      Action = "sts:AssumeRole"
+      Action    = "sts:AssumeRole"
     }]
   })
 }
@@ -27,6 +27,8 @@ resource "aws_eks_cluster" "this" {
   name     = "${var.environment}-eks-cluster"
   role_arn = aws_iam_role.cluster.arn
   version  = var.cluster_version
+
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   vpc_config {
     subnet_ids              = var.subnet_ids
@@ -54,6 +56,29 @@ resource "aws_kms_key" "eks" {
   enable_key_rotation     = true
 }
 
+resource "aws_kms_key_policy" "eks" {
+  key_id = aws_kms_key.eks.key_id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAccess"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowEKSServiceUse"
+        Effect    = "Allow"
+        Principal = { Service = "eks.amazonaws.com" }
+        Action    = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey", "kms:CreateGrant"]
+        Resource  = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_kms_alias" "eks" {
   name          = "alias/${var.environment}-eks-secrets"
   target_key_id = aws_kms_key.eks.key_id
@@ -62,11 +87,7 @@ resource "aws_kms_alias" "eks" {
 resource "aws_iam_openid_connect_provider" "this" {
   url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
   client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [var.oidc_thumbprint]
-}
-
-data "tls_certificate" "this" {
-  url = aws_eks_cluster.this.identity[0].oidc[0].issuer
+  thumbprint_list = []
 }
 
 resource "aws_iam_role" "node_group" {
@@ -74,9 +95,9 @@ resource "aws_iam_role" "node_group" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
+      Effect    = "Allow"
       Principal = { Service = "ec2.amazonaws.com" }
-      Action = "sts:AssumeRole"
+      Action    = "sts:AssumeRole"
     }]
   })
 }
@@ -127,17 +148,28 @@ resource "aws_iam_role_policy" "autoscaler" {
   role  = aws_iam_role.node_group.name
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "autoscaling:DescribeAutoScalingGroups",
-        "autoscaling:DescribeAutoScalingInstances",
-        "autoscaling:DescribeLaunchConfigurations",
-        "autoscaling:DescribeTags",
-        "autoscaling:SetDesiredCapacity",
-        "autoscaling:TerminateInstanceInAutoScalingGroup",
-      ]
-      Resource = "*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:DescribeAutoScalingInstances",
+          "autoscaling:DescribeLaunchConfigurations",
+          "autoscaling:DescribeTags",
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/${var.environment}-eks-cluster" = "owned" }
+        }
+      },
+    ]
   })
 }
